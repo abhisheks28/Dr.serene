@@ -9,6 +9,7 @@ export type ExamType = 'JEE' | 'NEET' | 'UPSC' | 'GATE' | 'CAT' | 'CUET' | 'SSC'
 export interface User {
   email: string;
   password?: string;
+  salt?: string;
   examType: ExamType;
   createdAt: string;
 }

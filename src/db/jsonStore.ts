@@ -5,6 +5,7 @@
 
 import fs from 'fs';
 import path from 'path';
+import crypto from 'crypto';
 import { 
   AnonymousSession, 
   JournalEntry, 
@@ -67,20 +68,34 @@ class JSONStore {
         this.save();
       }
 
-      // Pre-seed default login credentials
-      const defaultEmail = 'student@serene.com';
-      if (!this.data.users[defaultEmail]) {
-        this.data.users[defaultEmail] = {
-          email: defaultEmail,
-          password: 'password123',
-          examType: 'JEE',
-          createdAt: new Date().toISOString()
-        };
-        this.save();
-      }
+      this.seedDefaultUser();
 
     } catch (err) {
       console.error('Error loading JSON DB, using default schema:', err);
+    }
+  }
+
+  private hashPassword(password: string, salt: string): string {
+    return crypto.pbkdf2Sync(password, salt, 1000, 64, 'sha512').toString('hex');
+  }
+
+  private generateSalt(): string {
+    return crypto.randomBytes(16).toString('hex');
+  }
+
+  // Pre-seed default login credentials
+  private seedDefaultUser() {
+    const defaultEmail = 'student@serene.com';
+    if (!this.data.users[defaultEmail]) {
+      const salt = this.generateSalt();
+      this.data.users[defaultEmail] = {
+        email: defaultEmail,
+        password: this.hashPassword('password123', salt),
+        salt,
+        examType: 'JEE',
+        createdAt: new Date().toISOString()
+      };
+      this.save();
     }
   }
 
@@ -94,15 +109,37 @@ class JSONStore {
 
   // Users
   public createUser(email: string, password?: string, examType?: ExamType): User {
+    const salt = this.generateSalt();
     const user: User = {
       email,
-      password,
+      password: password ? this.hashPassword(password, salt) : undefined,
+      salt,
       examType: examType || 'JEE',
       createdAt: new Date().toISOString()
     };
     this.data.users[email] = user;
     this.save();
     return user;
+  }
+
+  public verifyUserPassword(email: string, passwordAttempt: string): boolean {
+    const user = this.getUser(email);
+    if (!user) return false;
+    
+    // Support potential legacy unhashed profiles seamlessly
+    if (!user.salt) {
+      const isPlaintextMatch = user.password === passwordAttempt;
+      if (isPlaintextMatch) {
+         const upgradedSalt = this.generateSalt();
+         user.salt = upgradedSalt;
+         user.password = this.hashPassword(passwordAttempt, upgradedSalt);
+         this.save();
+      }
+      return isPlaintextMatch;
+    }
+
+    const attemptHash = this.hashPassword(passwordAttempt, user.salt);
+    return user.password === attemptHash;
   }
 
   public getUser(email: string): User | undefined {

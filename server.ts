@@ -6,6 +6,8 @@
 import express from "express";
 import path from "path";
 import fs from "fs";
+import helmet from "helmet";
+import compression from "compression";
 import { db } from "./src/db/jsonStore.js";
 import { 
   analyzeStress, 
@@ -13,25 +15,60 @@ import {
   generateWellnessPlan, 
   generateCompanionChatResponse 
 } from "./src/services/geminiService.js";
+import { calculateDashboardStats } from "./src/services/dashboardService.js";
 import { ExamType, JournalEntry, ChatMessage, DashboardStats } from "./src/types.js";
 
 const app = express();
 export { app };
 export default app;
 
+  // Modern corporate-grade HTTP security headers
+  app.use(helmet({
+    contentSecurityPolicy: {
+      directives: {
+        defaultSrc: ["'self'"],
+        scriptSrc: ["'self'", "'unsafe-inline'", "'unsafe-eval'"],
+        styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
+        fontSrc: ["'self'", "https://fonts.gstatic.com"],
+        imgSrc: ["'self'", "data:", "https:"],
+        connectSrc: ["'self'", "https://api.semibold.ai", "https://generativelanguage.googleapis.com", "*"],
+        frameAncestors: ["'self'", "https://*.google.com", "https://*.semicolon.dev", "https://*.run.app", "https://*.studio", "https://ai.studio", "https://*.aistudio.google", "*"],
+      },
+    },
+    crossOriginEmbedderPolicy: false,
+    crossOriginResourcePolicy: false,
+    frameguard: false,
+  }));
+
+  // Gzip compression for extremely rapid, cost-efficient content networks
+  app.use(compression());
+
   // JSON Body Parser with standard size safety limit (XSS / Overload mitigation)
   app.use(express.json({ limit: "2mb" }));
 
-  // API rate limiting headers / safety headers
-  app.use((req, res, next) => {
-    res.setHeader("X-Content-Type-Options", "nosniff");
-    res.setHeader("X-Frame-Options", "DENY");
-    res.setHeader("X-XSS-Protection", "1; mode=block");
-    next();
-  });
+  // Lightweight secure in-memory request-pacing rate limiter to mitigate brute-force vectors
+  const authRateLimits = new Map<string, { count: number; resetTime: number }>();
+  function authRateLimiter(limit: number, windowMs: number) {
+    return (req: express.Request, res: express.Response, next: express.NextFunction) => {
+      const ip = (req.headers["x-forwarded-for"] as string) || req.socket.remoteAddress || "anonymous";
+      const now = Date.now();
+      const entry = authRateLimits.get(ip);
+      if (!entry || now > entry.resetTime) {
+        authRateLimits.set(ip, { count: 1, resetTime: now + windowMs });
+        return next();
+      }
+      entry.count++;
+      if (entry.count > limit) {
+        return res.status(429).json({ 
+          error: "Too many authentication attempts. Protect your account by pacing requests." 
+        });
+      }
+      next();
+    };
+  }
 
   // Endpoints: Session management
-  app.post("/api/auth/signup", (req, res) => {
+  app.post("/api/auth/signup", authRateLimiter(15, 60000), (req, res) => {
     const { email, password, examType } = req.body;
     if (!email || !password) {
       return res.status(400).json({ error: "Email and password are required" });
@@ -55,7 +92,7 @@ export default app;
     return res.json({ success: true, email: user.email, examType: user.examType });
   });
 
-  app.post("/api/auth/signin", (req, res) => {
+  app.post("/api/auth/signin", authRateLimiter(15, 60000), (req, res) => {
     const { email, password } = req.body;
     if (!email || !password) {
       return res.status(400).json({ error: "Email and password are required" });
@@ -64,7 +101,7 @@ export default app;
     const normalizedEmail = email.trim().toLowerCase();
     const user = db.getUser(normalizedEmail);
 
-    if (!user || user.password !== password) {
+    if (!user || !db.verifyUserPassword(normalizedEmail, password)) {
       return res.status(401).json({ error: "Invalid email or password" });
     }
 
@@ -314,116 +351,12 @@ export default app;
       const analyses = db.getStressAnalyses(sessionId);
       const latestPrediction = db.getLatestBurnoutPrediction(sessionId);
 
-      // 1. Overall Wellness Score (calculated from mood, energy, productivity levels and inverse stress)
-      let wellnessScore = 0;
-      let finalBurnoutRisk = 0;
-      let prodAvg = 0.0;
-      let stressAvg = 0.0;
-      let moodTimeline: Array<{ date: string; mood: number; stress: number; energy: number; productivity: number }> = [];
-      let finalTriggers: Array<{ trigger: string; percentage: number }> = [];
-      let burnoutForecast: Array<{ day: string; predictedRisk: number }> = [];
-      let weeklyInsights: string[] = [];
-      let monthlyInsights: string[] = [];
-
-      if (journals.length === 0) {
-        // Pristine zero-state for new users
-        wellnessScore = 0;
-        finalBurnoutRisk = 0;
-        prodAvg = 0;
-        stressAvg = 0;
-        moodTimeline = [];
-        finalTriggers = [];
-        burnoutForecast = [];
-        weeklyInsights = [
-          "Your dashboard is ready! Tap 'Wellness Logs' to write your first student diary entry to initialize personalized stress analysis."
-        ];
-        monthlyInsights = [
-          "Once your logs are recorded, Dr. Serene will populate this space with dynamic cognitive advice, pacing reminders, and clinical triggers."
-        ];
-      } else {
-        // Calculate dynamic values
-        const lastEntry = journals[journals.length - 1];
-        const scores = journals.map(j => {
-          const inverseStress = 10 - j.stress;
-          return (j.mood * 10 + j.energy * 10 + j.productivity * 10 + inverseStress * 10) / 4;
-        });
-        wellnessScore = Math.round(scores.reduce((a, b) => a + b, 0) / scores.length);
-
-        const riskCoefficient = latestPrediction ? latestPrediction.burnoutProbability : 30;
-        finalBurnoutRisk = Math.round(riskCoefficient);
-
-        prodAvg = Number((journals.reduce((sum, j) => sum + j.productivity, 0) / journals.length).toFixed(1));
-        stressAvg = Number((journals.reduce((sum, j) => sum + j.stress, 0) / journals.length).toFixed(1));
-
-        moodTimeline = journals.map(j => {
-          const formattedDate = new Date(j.date).toLocaleDateString('en-US', {
-            month: 'short',
-            day: 'numeric'
-          });
-          return {
-            date: formattedDate,
-            mood: j.mood,
-            stress: j.stress,
-            energy: j.energy,
-            productivity: j.productivity
-          };
-        });
-
-        // Computed Stress Triggers
-        const computedTriggers: Record<string, { total: number; count: number }> = {};
-        analyses.forEach(sa => {
-          sa.triggers.forEach(t => {
-            if (!computedTriggers[t.trigger]) {
-              computedTriggers[t.trigger] = { total: 0, count: 0 };
-            }
-            computedTriggers[t.trigger].total += t.percentage;
-            computedTriggers[t.trigger].count += 1;
-          });
-        });
-
-        const compiledTriggers = Object.keys(computedTriggers).map(key => ({
-          trigger: key,
-          percentage: Math.round(computedTriggers[key].total / computedTriggers[key].count)
-        })).sort((a, b) => b.percentage - a.percentage);
-
-        finalTriggers = compiledTriggers;
-
-        // Future 7-day Risk Trajectory
-        const dayLabels = ["Tomorrow", "Day 3", "Day 4", "Day 5", "Day 6", "7-Day Risk"];
-        const currentProbability = latestPrediction ? latestPrediction.burnoutProbability : 40;
-        const targetRisk = latestPrediction ? latestPrediction.predictedRisk7Days : 50;
-
-        burnoutForecast = dayLabels.map((day, ix) => {
-          const factor = ix / (dayLabels.length - 1);
-          const predictedRisk = Math.round(currentProbability + (targetRisk - currentProbability) * factor);
-          return { day, predictedRisk };
-        });
-
-        weeklyInsights = [
-          `Focus index is pacing at ${prodAvg}/10. Keep utilizing short 5-minute walks during sessions.`,
-          latestPrediction && latestPrediction.burnoutProbability > 60 
-            ? "CRITICAL WARNING: Continuous cognitive exhaustion detected. Elevate your rest intervals immediately." 
-            : "Workload and fatigue correlation is within optimal ranges. Maintain structured pauses."
-        ];
-
-        monthlyInsights = [
-          `Stress trends average ${stressAvg}/10. Focus on incremental mastering techniques before mock papers.`,
-          "Prioritize sleeping minimum 7 hours before big mock-test releases to optimize cognitive scores."
-        ];
-      }
-
-      const stats: DashboardStats = {
-        wellnessScore,
-        burnoutRisk: finalBurnoutRisk,
-        productivityAverage: prodAvg,
-        stressAverage: stressAvg,
-        examType: session.examType,
-        moodTimeline,
-        stressTriggers: finalTriggers,
-        burnoutForecast,
-        weeklyInsights,
-        monthlyInsights
-      };
+      const stats = calculateDashboardStats(
+        session.examType,
+        journals,
+        analyses,
+        latestPrediction
+      );
 
       return res.json(stats);
     } catch (err) {
@@ -443,7 +376,7 @@ export default app;
 
   // Serve static files in production or bind Vite server in development
   async function runServer() {
-    const PORT = process.env.PORT || 3000;
+    const PORT = 3000;
 
     if (process.env.NODE_ENV !== "production") {
       console.log("Vite dev middleware active.");
@@ -456,13 +389,13 @@ export default app;
     } else {
       console.log("Production static distribution active.");
       const distPath = path.join(process.cwd(), "dist");
-      app.use(express.static(distPath));
+      app.use(express.static(distPath, { maxAge: "1d", etag: true }));
       app.get("*", (req, res) => {
         res.sendFile(path.join(distPath, "index.html"));
       });
     }
 
-    app.listen(Number(PORT), "0.0.0.0", () => {
+    app.listen(PORT, "0.0.0.0", () => {
       console.log(`=================================================`);
       console.log(`Dr. Serene Mental Wellness Server Active on: ${PORT}`);
       console.log(`Model selected: gemini-3.5-flash`);
@@ -476,8 +409,6 @@ export default app;
     console.error("Unhandled Rejection:", err);
   });
 
-  if (!process.env.VERCEL) {
-    runServer().catch((err) => {
-      console.error("Critical server crash:", err);
-    });
-  }
+  runServer().catch((err) => {
+    console.error("Critical server crash:", err);
+  });

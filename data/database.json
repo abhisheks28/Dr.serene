@@ -1,11 +1,15 @@
 {
   "users": {},
-  "sessions": {},
+  "sessions": {
+    "session_demo_999": {
+      "id": "session_demo_999",
+      "examType": "UPSC",
+      "createdAt": "2026-06-20T08:34:35.676Z"
+    }
+  },
   "journals": [],
   "stressAnalyses": [],
   "burnoutPredictions": [],
   "wellnessPlans": [],
-  "chats": {
-    "session_test_123": []
-  }
+  "chats": {}
 }

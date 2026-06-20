@@ -17,14 +17,17 @@ describe('JSONStore Database Tests', () => {
 
       expect(createdUser).toBeDefined();
       expect(createdUser.email).toBe(testEmail);
-      expect(createdUser.password).toBe('testpass123');
+      expect(createdUser.password).not.toBe('testpass123'); // Password must be stored securely!
       expect(createdUser.examType).toBe(examType);
 
       const retrievedUser = db.getUser(testEmail);
       expect(retrievedUser).toBeDefined();
       expect(retrievedUser?.email).toBe(testEmail);
-      expect(retrievedUser?.password).toBe('testpass123');
       expect(retrievedUser?.examType).toBe(examType);
+
+      // Verify secure verification
+      expect(db.verifyUserPassword(testEmail, 'testpass123')).toBe(true);
+      expect(db.verifyUserPassword(testEmail, 'wrongpass')).toBe(false);
     });
 
     it('should return undefined for unregistered users', () => {
@@ -178,7 +181,7 @@ describe('JSONStore Database Tests', () => {
         id: 'm1',
         role: 'user',
         content: 'Hi Dr. Serene',
-        timestamp: new Date().toISOString()
+        createdAt: new Date().toISOString()
       };
 
       db.addChatMessage(testSessionId, message);
