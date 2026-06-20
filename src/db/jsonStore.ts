@@ -199,6 +199,19 @@ class JSONStore {
     this.data.chats[sessionId] = [];
     this.save();
   }
+
+  public resetForTest() {
+    this.data = {
+      users: {},
+      sessions: {},
+      journals: [],
+      stressAnalyses: [],
+      burnoutPredictions: [],
+      wellnessPlans: [],
+      chats: {}
+    };
+    this.save();
+  }
 }
 
 export const db = new JSONStore();

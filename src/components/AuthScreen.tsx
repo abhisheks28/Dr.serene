@@ -118,7 +118,7 @@ export default function AuthScreen({ onAuthSuccess, requestedMode }: AuthScreenP
         {/* Main form */}
         <form onSubmit={handleSubmit} className="space-y-5 relative">
           <div>
-            <label className="block text-[10px] uppercase font-mono font-bold tracking-wider text-slate-400 mb-1.5">
+            <label htmlFor="auth-email-input" className="block text-[10px] uppercase font-mono font-bold tracking-wider text-slate-400 mb-1.5">
               Secure Corporate/Personal Email
             </label>
             <div className="relative">
@@ -136,7 +136,7 @@ export default function AuthScreen({ onAuthSuccess, requestedMode }: AuthScreenP
           </div>
 
           <div>
-            <label className="block text-[10px] uppercase font-mono font-bold tracking-wider text-slate-400 mb-1.5">
+            <label htmlFor="auth-password-input" className="block text-[10px] uppercase font-mono font-bold tracking-wider text-slate-400 mb-1.5">
               Secure Password
             </label>
             <div className="relative">
@@ -155,10 +155,11 @@ export default function AuthScreen({ onAuthSuccess, requestedMode }: AuthScreenP
 
           {isSignUp && (
             <div className="animate-fadeIn">
-              <label className="block text-[10px] uppercase font-mono font-bold tracking-wider text-slate-400 mb-1.5">
+              <label htmlFor="auth-exam-select" className="block text-[10px] uppercase font-mono font-bold tracking-wider text-slate-400 mb-1.5">
                 Target High-Stakes Entrance Exam
               </label>
               <select
+                id="auth-exam-select"
                 aria-label="Target competitive examination value"
                 value={examType}
                 onChange={(e) => setExamType(e.target.value as ExamType)}

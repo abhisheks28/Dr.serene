@@ -142,10 +142,11 @@ export default function FormJournal({ sessionId, onJournalLogged, examType }: Fo
           {/* Core Logger Form */}
           <form onSubmit={handleSubmit} className="space-y-6">
             <div>
-              <label className="block text-xs font-bold text-slate-700 uppercase tracking-wide mb-2">
+              <label htmlFor="journal-textarea" className="block text-xs font-bold text-slate-700 uppercase tracking-wide mb-2">
                 Write Today's Study Log:
               </label>
               <textarea
+                id="journal-textarea"
                 aria-label="Daily study log content"
                 rows={5}
                 value={content}
