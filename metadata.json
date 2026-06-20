@@ -1,0 +1,6 @@
+{
+  "name": "Dr. Serene",
+  "description": "An AI-powered Student Mental Wellness Tracker and Cognitive Coach for competitive exam candidates including JEE, UPSC, NEET, or GATE.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
