@@ -6,7 +6,6 @@
 import express from "express";
 import path from "path";
 import fs from "fs";
-import { createServer as createViteServer } from "vite";
 import { db } from "./src/db/jsonStore.js";
 import { 
   analyzeStress, 
@@ -16,9 +15,9 @@ import {
 } from "./src/services/geminiService.js";
 import { ExamType, JournalEntry, ChatMessage, DashboardStats } from "./src/types.js";
 
-async function startServer() {
-  const app = express();
-  const PORT = 3000;
+const app = express();
+export { app };
+export default app;
 
   // JSON Body Parser with standard size safety limit (XSS / Overload mitigation)
   app.use(express.json({ limit: "2mb" }));
@@ -443,36 +442,42 @@ async function startServer() {
   });
 
   // Serve static files in production or bind Vite server in development
-  if (process.env.NODE_ENV !== "production") {
-    console.log("Vite dev middleware active.");
-    const vite = await createViteServer({
-      server: { middlewareMode: true },
-      appType: "spa",
-    });
-    app.use(vite.middlewares);
-  } else {
-    console.log("Production static distribution active.");
-    const distPath = path.join(process.cwd(), "dist");
-    app.use(express.static(distPath));
-    app.get("*", (req, res) => {
-      res.sendFile(path.join(distPath, "index.html"));
+  async function runServer() {
+    const PORT = process.env.PORT || 3000;
+
+    if (process.env.NODE_ENV !== "production") {
+      console.log("Vite dev middleware active.");
+      const { createServer: createViteServer } = await import("vite");
+      const vite = await createViteServer({
+        server: { middlewareMode: true },
+        appType: "spa",
+      });
+      app.use(vite.middlewares);
+    } else {
+      console.log("Production static distribution active.");
+      const distPath = path.join(process.cwd(), "dist");
+      app.use(express.static(distPath));
+      app.get("*", (req, res) => {
+        res.sendFile(path.join(distPath, "index.html"));
+      });
+    }
+
+    app.listen(Number(PORT), "0.0.0.0", () => {
+      console.log(`=================================================`);
+      console.log(`Dr. Serene Mental Wellness Server Active on: ${PORT}`);
+      console.log(`Model selected: gemini-3.5-flash`);
+      console.log(`AI Engine configured: ${!!process.env.GEMINI_API_KEY ? "LIVE" : "SIMULATED FALLBACK"}`);
+      console.log(`=================================================`);
     });
   }
 
-  app.listen(PORT, "0.0.0.0", () => {
-    console.log(`=================================================`);
-    console.log(`Dr. Serene Mental Wellness Server Active on: 3000`);
-    console.log(`Model selected: gemini-3.5-flash`);
-    console.log(`AI Engine configured: ${!!process.env.GEMINI_API_KEY ? "LIVE" : "SIMULATED FALLBACK"}`);
-    console.log(`=================================================`);
+  // Ensure error handle in process
+  process.on("unhandledRejection", (err) => {
+    console.error("Unhandled Rejection:", err);
   });
-}
 
-// Ensure error handle in process
-process.on("unhandledRejection", (err) => {
-  console.error("Unhandled Rejection:", err);
-});
-
-startServer().catch((err) => {
-  console.error("Critical server crash:", err);
-});
+  if (!process.env.VERCEL) {
+    runServer().catch((err) => {
+      console.error("Critical server crash:", err);
+    });
+  }
